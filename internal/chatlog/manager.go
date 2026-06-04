@@ -207,6 +207,9 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	}
 
 	pid := m.ctx.Current.PID
+	if pid == 0 {
+		return fmt.Errorf("微信进程未运行，请先启动微信后再操作")
+	}
 	exePath := m.ctx.Current.ExePath
 	platform := m.ctx.Current.Platform
 

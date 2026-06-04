@@ -126,6 +126,17 @@ func (c *Context) SwitchHistory(account string) {
 		c.HookForwardContacts = history.HookForwardContacts
 		c.HookForwardChatRooms = history.HookForwardChatRooms
 		c.Semantic = conf.NormalizeSemanticConfig(history.Semantic)
+		// 从历史数据创建 Account 对象，确保 Current 不为 nil（即使微信未运行也能使用）
+		c.Current = &wechat.Account{
+			Name:        history.Account,
+			Platform:    history.Platform,
+			Version:     history.Version,
+			FullVersion: history.FullVersion,
+			DataDir:     history.DataDir,
+			Key:         history.DataKey,
+			ImgKey:      history.ImgKey,
+			Status:      "offline",
+		}
 	} else {
 		c.Account = ""
 		c.Platform = ""
