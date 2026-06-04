@@ -123,6 +123,18 @@ jobs:
         with:
           path: release-assets
 
+      - name: Delete old release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          OLD_RELEASE=$(gh release view latest --json tagName -q .tagName 2>/dev/null || echo "")
+          if [ -n "$OLD_RELEASE" ]; then
+            echo "Deleting old release with tag: $OLD_RELEASE"
+            gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          fi
+
       - name: Collect Files
         shell: bash
         run: |
