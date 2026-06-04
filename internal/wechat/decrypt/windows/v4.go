@@ -25,6 +25,7 @@ const (
 	KDFIter      = 256000
 	KDFIterMac   = 2
 	HMACSize     = 64
+	IVSize       = 16
 )
 
 type V4Decryptor struct{}
