@@ -526,6 +526,9 @@ func isDarwinScanStageErr(err error) bool {
 
 func pickBestWeChatInstance(instances []*iwechat.Account, exePath, platform string) *iwechat.Account {
 	var best *iwechat.Account
+	var mainProcess *iwechat.Account  // 主进程（Weixin.exe 或 WeChat.exe）
+	var rendererProcess *iwechat.Account  // 渲染进程（WeChatAppEx.exe）
+
 	for _, inst := range instances {
 		if inst == nil {
 			continue
@@ -536,21 +539,49 @@ func pickBestWeChatInstance(instances []*iwechat.Account, exePath, platform stri
 		if exePath != "" && inst.ExePath != exePath {
 			continue
 		}
-		// 优先有 DataDir 的实例；同等条件下选 PID 更大的（通常是最新进程）
-		if best == nil {
-			best = inst
-			continue
-		}
-		bestHasData := best.DataDir != ""
-		curHasData := inst.DataDir != ""
-		if curHasData && !bestHasData {
-			best = inst
-			continue
-		}
-		if curHasData == bestHasData && inst.PID > best.PID {
-			best = inst
+
+		// 区分主进程和渲染进程
+		// WeChatAppEx.exe 是渲染进程，Weixin.exe 是主进程
+		if inst.IsRenderer {
+			// 渲染进程：优先有 DataDir 的；同等条件下选 PID 更大的
+			if rendererProcess == nil {
+				rendererProcess = inst
+				continue
+			}
+			rendererHasData := rendererProcess.DataDir != ""
+			curHasData := inst.DataDir != ""
+			if curHasData && !rendererHasData {
+				rendererProcess = inst
+				continue
+			}
+			if curHasData == rendererHasData && inst.PID > rendererProcess.PID {
+				rendererProcess = inst
+			}
+		} else {
+			// 主进程：优先有 DataDir 的；同等条件下选 PID 更大的
+			if mainProcess == nil {
+				mainProcess = inst
+				continue
+			}
+			mainHasData := mainProcess.DataDir != ""
+			curHasData := inst.DataDir != ""
+			if curHasData && !mainHasData {
+				mainProcess = inst
+				continue
+			}
+			if curHasData == mainHasData && inst.PID > mainProcess.PID {
+				mainProcess = inst
+			}
 		}
 	}
+
+	// 优先选择主进程（Weixin.exe），如果没有主进程则选择渲染进程
+	if mainProcess != nil {
+		best = mainProcess
+	} else if rendererProcess != nil {
+		best = rendererProcess
+	}
+
 	return best
 }
 

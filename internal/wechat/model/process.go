@@ -9,6 +9,7 @@ type Process struct {
 	Status      string
 	DataDir     string
 	AccountName string
+	IsRenderer  bool  // 是否是渲染进程（WeChatAppEx.exe）
 }
 
 // 平台常量定义

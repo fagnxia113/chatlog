@@ -26,6 +26,7 @@ type Account struct {
 	PID         uint32
 	ExePath     string
 	Status      string
+	IsRenderer  bool  // 是否是渲染进程（WeChatAppEx.exe）
 }
 
 // NewAccount 创建新的账号对象
@@ -39,6 +40,7 @@ func NewAccount(proc *model.Process) *Account {
 		PID:         proc.PID,
 		ExePath:     proc.ExePath,
 		Status:      proc.Status,
+		IsRenderer:  proc.IsRenderer,
 	}
 
 	// 尝试从配置中加载保存的密钥
