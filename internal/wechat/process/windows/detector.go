@@ -1,6 +1,8 @@
 package windows
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -38,13 +40,7 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 	for _, p := range processes {
 		name, err := p.Name()
 		name = strings.TrimSuffix(name, ".exe")
-		if err != nil || (name != V3ProcessName && name != V4ProcessName) {
-			continue
-		}
-
-		// WeChatAppEx 是 Weixin.exe 的 Chromium 渲染子进程，不能独立重启，
-		// 不应作为可选的微信实例，跳过
-		if name == V4XProcessName {
+		if err != nil || (name != V3ProcessName && name != V4ProcessName && name != V4XProcessName) {
 			continue
 		}
 
@@ -65,6 +61,11 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 		if err != nil {
 			log.Err(err).Msgf("获取进程 %d 的信息失败", p.Pid)
 			continue
+		}
+
+		// WeChatAppEx 是基于 Chromium 的渲染进程，其文件版本号不是微信版本号，需要强制设为 v4
+		if name == V4XProcessName {
+			procInfo.Version = 4
 		}
 
 		result = append(result, procInfo)
@@ -89,6 +90,18 @@ func (d *Detector) getProcessInfo(p *process.Process) (*model.Process, error) {
 	}
 	procInfo.ExePath = exePath
 
+	// 获取进程名（不含.exe后缀）
+	procName, _ := p.Name()
+	procName = strings.TrimSuffix(procName, ".exe")
+
+	// WeChatAppEx 不能独立启动，需要找到 Weixin.exe 作为启动器
+	if procName == V4XProcessName {
+		if launcher := findWeChatLauncher(exePath); launcher != "" {
+			log.Debug().Msgf("WeChatAppEx 检测到启动器: %s", launcher)
+			procInfo.ExePath = launcher
+		}
+	}
+
 	// 获取版本信息
 	versionInfo, err := appver.New(exePath)
 	if err != nil {
@@ -107,4 +120,23 @@ func (d *Detector) getProcessInfo(p *process.Process) (*model.Process, error) {
 	}
 
 	return procInfo, nil
+}
+
+// findWeChatLauncher 在 WeChatAppEx.exe 的上级目录中查找 Weixin.exe 作为启动器
+// WeChatAppEx.exe 通常位于 .../WeChat/WeChatAppEx/WeChatAppEx.exe
+// 而 Weixin.exe 位于 .../WeChat/Weixin.exe
+func findWeChatLauncher(weChatAppExPath string) string {
+	dir := filepath.Dir(weChatAppExPath)
+	for i := 0; i < 5; i++ {
+		candidate := filepath.Join(dir, "Weixin.exe")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }

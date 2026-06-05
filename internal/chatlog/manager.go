@@ -262,7 +262,7 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		instances := m.wechat.GetWeChatInstances()
 		// Try to find a new instance. A new instance is one with a different PID.
 		for _, inst := range instances {
-			if inst.PID != pid && inst.ExePath == exePath {
+			if inst.PID != pid && inst.Platform == platform {
 				newInstance = inst
 				break
 			}
