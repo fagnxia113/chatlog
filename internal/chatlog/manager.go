@@ -602,6 +602,16 @@ func escapeAppleScript(s string) string {
 }
 
 func startWeChatProcess(platform, exePath string) error {
+	// 检查 exePath 是否为空
+	if exePath == "" {
+		return fmt.Errorf("微信可执行文件路径为空，无法启动微信")
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(exePath); err != nil {
+		return fmt.Errorf("微信可执行文件不存在: %s", exePath)
+	}
+
 	// macOS: 若当前进程为 sudo/root，必须以原登录用户启动微信，
 	// 否则微信会落在 /private/var/root/... 导致扫描/解密命中错误账号目录。
 	if platform == "darwin" && os.Geteuid() == 0 {

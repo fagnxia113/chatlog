@@ -163,12 +163,28 @@ func (c *Context) SwitchHistory(account string) {
 }
 
 func (c *Context) SwitchCurrent(info *wechat.Account) {
+	// 先保存当前实例的关键信息（如 ExePath），避免被 SwitchHistory 重置
+	savedExePath := info.ExePath
+	savedPID := info.PID
+	savedStatus := info.Status
+
 	c.SwitchHistory(info.Name)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Current = info
-	c.Refresh()
 
+	// 确保 ExePath 不被历史数据覆盖（历史数据可能没有 ExePath）
+	if savedExePath != "" && c.Current.ExePath == "" {
+		c.Current.ExePath = savedExePath
+	}
+	if savedPID != 0 && c.Current.PID == 0 {
+		c.Current.PID = savedPID
+	}
+	if savedStatus != "" && c.Current.Status == "" {
+		c.Current.Status = savedStatus
+	}
+
+	c.Refresh()
 }
 func (c *Context) Refresh() {
 	if c.Current != nil {
