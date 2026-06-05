@@ -319,6 +319,7 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	ctx = context.WithValue(ctx, "force_rescan_memory", true)
 
 	var key, imgKey string
+	var err error
 	helperTried := false
 
 	// 初始化截止时间：
