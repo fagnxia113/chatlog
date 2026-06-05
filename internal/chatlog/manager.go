@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -709,7 +710,15 @@ func startWeChatProcess(platform, exePath string) error {
 		}
 	}
 
+	// Windows: 使用 cmd /c start 启动微信，确保 GUI 进程正确启动
+	if platform == "windows" {
+		cmd := exec.Command("cmd", "/c", "start", "", exePath)
+		cmd.Dir = filepath.Dir(exePath)
+		return cmd.Run()
+	}
+
 	cmd := exec.Command(exePath)
+	cmd.Dir = filepath.Dir(exePath)
 	return cmd.Start()
 }
 
