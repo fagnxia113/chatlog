@@ -223,31 +223,45 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	exePath := m.ctx.Current.ExePath
 	platform := m.ctx.Current.Platform
 
-	// 1. Terminate the process
+	// 1. Terminate all related WeChat processes
 	if onStatus != nil {
 		onStatus("正在结束微信进程...")
 	}
-	log.Info().Msgf("Killing WeChat process with PID %d", pid)
-	process, err := os.FindProcess(int(pid))
-	if err != nil {
-		return fmt.Errorf("could not find process with PID %d: %w", pid, err)
+
+	// 获取所有相关进程的 PID（同一 exePath 或同一平台的所有微信进程）
+	allPIDs := make(map[uint32]bool)
+	for _, inst := range instances {
+		if inst.Platform == platform {
+			allPIDs[inst.PID] = true
+		}
 	}
-	if err := process.Kill(); err != nil {
-		return fmt.Errorf("failed to kill process with PID %d: %w", pid, err)
+	// 确保当前 PID 也包含在内
+	allPIDs[pid] = true
+
+	log.Info().Msgf("Killing all WeChat processes: PIDs %v", allPIDs)
+	for p := range allPIDs {
+		process, err := os.FindProcess(int(p))
+		if err != nil {
+			log.Warn().Msgf("could not find process with PID %d: %v", p, err)
+			continue
+		}
+		if err := process.Kill(); err != nil {
+			log.Warn().Msgf("failed to kill process with PID %d: %v", p, err)
+		}
 	}
 
-	// 2. Wait for the process to disappear
-	log.Info().Msg("Waiting for WeChat process to terminate...")
-	for i := 0; i < 10; i++ { // Wait for max 10 seconds
+	// 2. Wait for all processes to disappear
+	log.Info().Msg("Waiting for all WeChat processes to terminate...")
+	for i := 0; i < 15; i++ { // Wait for max 15 seconds
 		instances := m.wechat.GetWeChatInstances()
-		found := false
+		allTerminated := true
 		for _, inst := range instances {
-			if inst.PID == pid {
-				found = true
+			if inst.Platform == platform && allPIDs[inst.PID] {
+				allTerminated = false
 				break
 			}
 		}
-		if !found {
+		if allTerminated {
 			break
 		}
 		time.Sleep(1 * time.Second)
@@ -270,11 +284,13 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	var newInstance *iwechat.Account
 	for i := 0; i < 30; i++ { // Wait for max 30 seconds
 		instances := m.wechat.GetWeChatInstances()
-		// Try to find a new instance. A new instance is one with a different PID.
+		// Try to find a new instance. A new instance is one with a PID not in allPIDs.
 		for _, inst := range instances {
-			if inst.PID != pid && inst.Platform == platform {
-				newInstance = inst
-				break
+			if !allPIDs[inst.PID] && inst.Platform == platform {
+				// 优先选择有 ExePath 的实例
+				if newInstance == nil || inst.ExePath != "" {
+					newInstance = inst
+				}
 			}
 		}
 		if newInstance != nil {
