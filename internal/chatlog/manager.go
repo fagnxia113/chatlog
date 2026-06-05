@@ -336,8 +336,9 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 
 	// 初始化截止时间：
 	// - macOS: 用户需要完成登录，给更长窗口
+	// - Windows: 用户需要扫码登录，也需要较长等待
 	// - 其他平台: 保持较短等待
-	waitWindow := 30 * time.Second
+	waitWindow := 60 * time.Second
 	if platform == "darwin" {
 		waitWindow = 180 * time.Second
 	}
@@ -351,14 +352,12 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		elapsed := int(time.Since(started).Seconds())
 		total := int(waitWindow.Seconds())
 
-		// macOS: 每轮重试前重新绑定当前可用微信实例，避免重启后 PID/账户漂移导致持续扫描错误进程。
-		if platform == "darwin" {
-			if best := pickBestWeChatInstance(m.wechat.GetWeChatInstances(), exePath, platform); best != nil {
-				if m.ctx.Current == nil || m.ctx.Current.PID != best.PID {
-					m.ctx.SwitchCurrent(best)
-					if onStatus != nil {
-						onStatus(fmt.Sprintf("已切换到最新微信进程 PID=%d，继续扫描...", best.PID))
-					}
+		// Windows/macOS: 每轮重试前重新绑定当前可用微信实例，避免重启后 PID/账户漂移导致持续扫描错误进程。
+		if best := pickBestWeChatInstance(m.wechat.GetWeChatInstances(), exePath, platform); best != nil {
+			if m.ctx.Current == nil || m.ctx.Current.PID != best.PID {
+				m.ctx.SwitchCurrent(best)
+				if onStatus != nil {
+					onStatus(fmt.Sprintf("已切换到最新微信进程 PID=%d，继续扫描...", best.PID))
 				}
 			}
 		}
@@ -375,13 +374,15 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 			}
 		}
 
-		// macOS: 登录就绪前不触发扫描，避免“未登录就开始扫 key”导致的噪声重试。
-		if platform == "darwin" && !isDarwinLoginReady(m.ctx.Current, restartedAt) {
+		// macOS/Windows: 登录就绪前不触发扫描，避免"未登录就开始扫 key"导致的噪声重试。
+		// Windows: DataDir 为空表示微信未登录
+		if (platform == "darwin" && !isDarwinLoginReady(m.ctx.Current, restartedAt)) ||
+			(platform == "windows" && (m.ctx.Current == nil || m.ctx.Current.DataDir == "")) {
 			if onStatus != nil {
 				onStatus(fmt.Sprintf("等待微信登录完成后再启动密钥扫描...（重试 %d 次，已等待 %ds/%ds）", attempt, elapsed, total))
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("获取密钥超时: 微信登录未就绪")
+				return fmt.Errorf("获取密钥超时: 微信登录未就绪，请扫码登录微信后重试")
 			}
 			time.Sleep(1 * time.Second)
 			continue
