@@ -228,25 +228,35 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		onStatus("正在结束微信进程...")
 	}
 
-	// 获取所有相关进程的 PID（同一 exePath 或同一平台的所有微信进程）
-	allPIDs := make(map[uint32]bool)
-	for _, inst := range instances {
-		if inst.Platform == platform {
-			allPIDs[inst.PID] = true
+	// Windows: 使用 taskkill 强制终止微信进程及其子进程
+	if platform == "windows" {
+		// 先尝试按进程名终止所有微信相关进程
+		wechatProcessNames := []string{"Weixin.exe", "WeChatAppEx.exe", "WeChat.exe"}
+		for _, procName := range wechatProcessNames {
+			cmd := exec.Command("taskkill", "/F", "/IM", procName)
+			cmd.CombinedOutput() // 忽略错误，进程可能不存在
+			log.Info().Msgf("taskkill /F /IM %s", procName)
 		}
-	}
-	// 确保当前 PID 也包含在内
-	allPIDs[pid] = true
+	} else {
+		// 非 Windows: 使用 Go 的 process.Kill()
+		allPIDs := make(map[uint32]bool)
+		for _, inst := range instances {
+			if inst.Platform == platform {
+				allPIDs[inst.PID] = true
+			}
+		}
+		allPIDs[pid] = true
 
-	log.Info().Msgf("Killing all WeChat processes: PIDs %v", allPIDs)
-	for p := range allPIDs {
-		process, err := os.FindProcess(int(p))
-		if err != nil {
-			log.Warn().Msgf("could not find process with PID %d: %v", p, err)
-			continue
-		}
-		if err := process.Kill(); err != nil {
-			log.Warn().Msgf("failed to kill process with PID %d: %v", p, err)
+		log.Info().Msgf("Killing all WeChat processes: PIDs %v", allPIDs)
+		for p := range allPIDs {
+			process, err := os.FindProcess(int(p))
+			if err != nil {
+				log.Warn().Msgf("could not find process with PID %d: %v", p, err)
+				continue
+			}
+			if err := process.Kill(); err != nil {
+				log.Warn().Msgf("failed to kill process with PID %d: %v", p, err)
+			}
 		}
 	}
 
@@ -254,9 +264,13 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	log.Info().Msg("Waiting for all WeChat processes to terminate...")
 	for i := 0; i < 15; i++ { // Wait for max 15 seconds
 		instances := m.wechat.GetWeChatInstances()
+		if len(instances) == 0 {
+			break
+		}
+		// 检查是否还有同平台的进程
 		allTerminated := true
 		for _, inst := range instances {
-			if inst.Platform == platform && allPIDs[inst.PID] {
+			if inst.Platform == platform {
 				allTerminated = false
 				break
 			}
@@ -296,10 +310,9 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	var newInstance *iwechat.Account
 	for i := 0; i < 30; i++ { // Wait for max 30 seconds
 		instances := m.wechat.GetWeChatInstances()
-		// Try to find a new instance. A new instance is one with a PID not in allPIDs.
+		// 优先选择非渲染进程且有 ExePath 的实例
 		for _, inst := range instances {
-			if !allPIDs[inst.PID] && inst.Platform == platform {
-				// 优先选择有 ExePath 的实例
+			if inst.Platform == platform && !inst.IsRenderer {
 				if newInstance == nil || inst.ExePath != "" {
 					newInstance = inst
 				}
