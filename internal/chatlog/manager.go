@@ -303,28 +303,37 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	}
 	log.Info().Msgf("Restarting WeChat from %s (exePath=%s)", exePath, exePath)
 
-	// 检查 exePath 是否为空
-	if exePath == "" {
-		return fmt.Errorf("微信可执行文件路径为空，无法启动微信。请手动启动微信后重试。")
+	// 尝试自动启动微信，如果失败则等待用户手动启动
+	if exePath != "" {
+		if _, err := os.Stat(exePath); err == nil {
+			if err := startWeChatProcess(platform, exePath); err != nil {
+				log.Warn().Msgf("自动启动微信失败: %v，等待用户手动启动", err)
+				if onStatus != nil {
+					onStatus("自动启动微信失败，请手动启动微信...")
+				}
+			} else {
+				log.Info().Msg("微信启动命令已发送")
+			}
+		} else {
+			log.Warn().Msgf("微信可执行文件不存在: %s，等待用户手动启动", exePath)
+			if onStatus != nil {
+				onStatus("请手动启动微信...")
+			}
+		}
+	} else {
+		log.Warn().Msg("微信可执行文件路径为空，等待用户手动启动")
+		if onStatus != nil {
+			onStatus("请手动启动微信...")
+		}
 	}
 
-	// 检查文件是否存在
-	if _, err := os.Stat(exePath); err != nil {
-		return fmt.Errorf("微信可执行文件不存在: %s。请手动启动微信后重试。", exePath)
-	}
-
-	if err := startWeChatProcess(platform, exePath); err != nil {
-		return fmt.Errorf("failed to restart WeChat: %w", err)
-	}
-	log.Info().Msg("WeChat process started successfully")
-
-	// 4. Wait for the new process to appear.
+	// 4. Wait for the new process to appear (also waits for manual start)
 	if onStatus != nil {
-		onStatus("正在等待新进程启动...")
+		onStatus("正在等待微信启动...")
 	}
-	log.Info().Msg("Waiting for new WeChat process to start...")
+	log.Info().Msg("Waiting for WeChat process to start...")
 	var newInstance *iwechat.Account
-	for i := 0; i < 30; i++ { // Wait for max 30 seconds
+	for i := 0; i < 60; i++ { // Wait for max 60 seconds
 		instances := m.wechat.GetWeChatInstances()
 		// 优先选择非渲染进程且有 ExePath 的实例
 		for _, inst := range instances {
