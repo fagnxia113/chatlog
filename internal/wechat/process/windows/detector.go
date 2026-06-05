@@ -61,6 +61,11 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 			continue
 		}
 
+		// WeChatAppEx 是基于 Chromium 的渲染进程，其文件版本号不是微信版本号，需要强制设为 v4
+		if name == V4XProcessName {
+			procInfo.Version = 4
+		}
+
 		result = append(result, procInfo)
 	}
 
