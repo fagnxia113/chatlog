@@ -271,10 +271,22 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	if onStatus != nil {
 		onStatus("正在重启微信...")
 	}
-	log.Info().Msgf("Restarting WeChat from %s", exePath)
+	log.Info().Msgf("Restarting WeChat from %s (exePath=%s)", exePath, exePath)
+
+	// 检查 exePath 是否为空
+	if exePath == "" {
+		return fmt.Errorf("微信可执行文件路径为空，无法启动微信。请手动启动微信后重试。")
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(exePath); err != nil {
+		return fmt.Errorf("微信可执行文件不存在: %s。请手动启动微信后重试。", exePath)
+	}
+
 	if err := startWeChatProcess(platform, exePath); err != nil {
 		return fmt.Errorf("failed to restart WeChat: %w", err)
 	}
+	log.Info().Msg("WeChat process started successfully")
 
 	// 4. Wait for the new process to appear.
 	if onStatus != nil {
