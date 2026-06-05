@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	V3ProcessName = "WeChat"
-	V4ProcessName = "Weixin"
-	V3DBFile      = `Msg\Misc.db`
-	V4DBFile      = `db_storage\session\session.db`
+	V3ProcessName  = "WeChat"
+	V4ProcessName  = "Weixin"
+	V4XProcessName = "WeChatAppEx"
+	V3DBFile       = `Msg\Misc.db`
+	V4DBFile       = `db_storage\session\session.db`
 )
 
 // Detector 实现 Windows 平台的进程检测器
@@ -37,7 +38,7 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 	for _, p := range processes {
 		name, err := p.Name()
 		name = strings.TrimSuffix(name, ".exe")
-		if err != nil || (name != V3ProcessName && name != V4ProcessName) {
+		if err != nil || (name != V3ProcessName && name != V4ProcessName && name != V4XProcessName) {
 			continue
 		}
 
