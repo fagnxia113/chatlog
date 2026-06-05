@@ -335,10 +335,23 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	var newInstance *iwechat.Account
 	for i := 0; i < 60; i++ { // Wait for max 60 seconds
 		instances := m.wechat.GetWeChatInstances()
-		// 优先选择非渲染进程且有 ExePath 的实例
+		if i%5 == 0 || len(instances) > 0 {
+			log.Info().Msgf("Waiting for WeChat: found %d instances (attempt %d/60)", len(instances), i+1)
+			for _, inst := range instances {
+				log.Info().Msgf("  instance: PID=%d, Platform=%s, IsRenderer=%v, ExePath=%s, DataDir=%s",
+					inst.PID, inst.Platform, inst.IsRenderer, inst.ExePath, inst.DataDir)
+			}
+		}
+		// 接受任何同平台的微信进程，优先选择非渲染进程
 		for _, inst := range instances {
-			if inst.Platform == platform && !inst.IsRenderer {
-				if newInstance == nil || inst.ExePath != "" {
+			if inst.Platform == platform {
+				// 优先选择非渲染进程
+				if !inst.IsRenderer {
+					newInstance = inst
+					break
+				}
+				// 如果只有渲染进程，也接受
+				if newInstance == nil {
 					newInstance = inst
 				}
 			}
