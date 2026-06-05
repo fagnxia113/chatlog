@@ -221,8 +221,23 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	if pid == 0 {
 		return fmt.Errorf("微信进程未运行，请先启动微信后再操作")
 	}
+
+	// 在终止进程之前保存 exePath，避免后续丢失
 	exePath := m.ctx.Current.ExePath
 	platform := m.ctx.Current.Platform
+
+	log.Info().Msgf("RestartAndGetDataKey: PID=%d, exePath=%s, platform=%s", pid, exePath, platform)
+
+	// 如果 exePath 为空，尝试从进程列表中查找
+	if exePath == "" {
+		for _, inst := range instances {
+			if inst.Platform == platform && inst.ExePath != "" && !inst.IsRenderer {
+				exePath = inst.ExePath
+				log.Info().Msgf("Found exePath from instance list: %s", exePath)
+				break
+			}
+		}
+	}
 
 	// 1. Terminate all related WeChat processes
 	if onStatus != nil {
@@ -687,6 +702,8 @@ func startWeChatProcess(platform, exePath string) error {
 		return fmt.Errorf("微信可执行文件不存在: %s", exePath)
 	}
 
+	log.Info().Msgf("startWeChatProcess: platform=%s, exePath=%s", platform, exePath)
+
 	// macOS: 若当前进程为 sudo/root，必须以原登录用户启动微信，
 	// 否则微信会落在 /private/var/root/... 导致扫描/解密命中错误账号目录。
 	if platform == "darwin" && os.Geteuid() == 0 {
@@ -710,11 +727,38 @@ func startWeChatProcess(platform, exePath string) error {
 		}
 	}
 
-	// Windows: 使用 cmd /c start 启动微信，确保 GUI 进程正确启动
+	// Windows: 尝试多种方式启动微信
 	if platform == "windows" {
-		cmd := exec.Command("cmd", "/c", "start", "", exePath)
-		cmd.Dir = filepath.Dir(exePath)
-		return cmd.Run()
+		// 方法1: 直接启动
+		cmd1 := exec.Command(exePath)
+		cmd1.Dir = filepath.Dir(exePath)
+		if err := cmd1.Start(); err != nil {
+			log.Warn().Msgf("方法1 直接启动失败: %v", err)
+		} else {
+			log.Info().Msg("方法1 直接启动成功")
+			return nil
+		}
+
+		// 方法2: 使用 cmd start 启动
+		cmd2 := exec.Command("cmd", "/c", "start", "", exePath)
+		cmd2.Dir = filepath.Dir(exePath)
+		if err := cmd2.Run(); err != nil {
+			log.Warn().Msgf("方法2 cmd start 启动失败: %v", err)
+		} else {
+			log.Info().Msg("方法2 cmd start 启动成功")
+			return nil
+		}
+
+		// 方法3: 使用 PowerShell Start-Process 启动
+		cmd3 := exec.Command("powershell", "-Command", "Start-Process", "-FilePath", exePath)
+		if err := cmd3.Run(); err != nil {
+			log.Warn().Msgf("方法3 PowerShell 启动失败: %v", err)
+		} else {
+			log.Info().Msg("方法3 PowerShell 启动成功")
+			return nil
+		}
+
+		return fmt.Errorf("所有启动方式均失败，请手动启动微信")
 	}
 
 	cmd := exec.Command(exePath)
