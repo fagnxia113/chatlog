@@ -206,6 +206,16 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		return fmt.Errorf("未选择任何账号")
 	}
 
+	instances := m.wechat.GetWeChatInstances()
+	m.ctx.WeChatInstances = instances
+	if best := pickBestWeChatInstance(instances, m.ctx.Current.ExePath, m.ctx.Current.Platform); best != nil {
+		if m.ctx.Current.PID == 0 || m.ctx.Current.PID != best.PID {
+			m.ctx.SwitchCurrent(best)
+		}
+	} else if len(instances) > 0 {
+		m.ctx.SwitchCurrent(instances[0])
+	}
+
 	pid := m.ctx.Current.PID
 	if pid == 0 {
 		return fmt.Errorf("微信进程未运行，请先启动微信后再操作")
