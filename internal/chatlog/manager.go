@@ -422,19 +422,7 @@ func normalizeKeyAcquireError(err error) error {
 	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "scan memory failed") || strings.Contains(msg, "task_for_pid") || strings.Contains(msg, "code=-2") {
-		return fmt.Errorf(
-			"获取密钥失败：macOS 进程内存读取权限不足（task_for_pid）。\n"+
-				"请按以下步骤（参考 wx-cli）处理后重试：\n"+
-				"1) 对 WeChat 做 ad-hoc 签名（只需一次，升级微信后需重做）:\n"+
-				"   codesign --force --deep --sign - /Applications/WeChat.app\n"+
-				"2) 重启微信并完成登录:\n"+
-				"   killall WeChat && open /Applications/WeChat.app\n"+
-				"3) 使用管理员权限启动本程序后再点"重启并获取密钥":\n"+
-				"   sudo -E go run .\n"+
-				"若 codesign 报 \"signature in use\"，先执行:\n"+
-				"   codesign --remove-signature /Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib\n"+
-				"   codesign --force --deep --sign - /Applications/WeChat.app\n"+
-				"原始错误: %w", err)
+		return fmt.Errorf("获取密钥失败：进程内存读取权限不足，请以管理员权限运行本程序。原始错误: %w", err)
 	}
 	return err
 }

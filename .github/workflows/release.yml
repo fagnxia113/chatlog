@@ -6,48 +6,6 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  build-macos:
-    name: Build macOS (amd64, arm64)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Build Binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          for arch in amd64 arm64; do
-            CGO_ENABLED=1 GOOS=darwin GOARCH="${arch}" \
-              go build -trimpath -ldflags "-s -w -X github.com/sjzar/chatlog/pkg/version.Version=${GITHUB_REF_NAME}" \
-              -o "dist/chatlog-darwin-${arch}" .
-          done
-
-      - name: Package Archives
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          short_sha="${GITHUB_SHA::7}"
-          for arch in amd64 arm64; do
-            archive="release/chatlog_${short_sha}_darwin_${arch}.zip"
-            /usr/bin/zip -j "${archive}" "dist/chatlog-darwin-${arch}" LICENSE README.md
-          done
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: release-macos
-          path: |
-            dist/chatlog-darwin-*
-            release/*.zip
-
   build-windows:
     name: Build Windows (amd64, arm64)
     runs-on: windows-latest
@@ -113,7 +71,6 @@ jobs:
     name: Publish Release Assets
     runs-on: ubuntu-latest
     needs:
-      - build-macos
       - build-windows
     permissions:
       contents: write
@@ -140,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p publish
-          find release-assets -type f \( -name "*.zip" -o -name "*.exe" -o -name "chatlog-darwin-*" \) -exec cp {} publish/ \;
+          find release-assets -type f \( -name "*.zip" -o -name "*.exe" \) -exec cp {} publish/ \;
           ls -lah publish
 
       - name: Publish Latest Release
