@@ -788,7 +788,8 @@ func applyWAL(walPath, outPath, srcDBPath, hexKey string) error {
 	if err != nil {
 		return err
 	}
-	encKey, macKey := deriveKeysRaw(keyBytes, salt)
+	encKey := keyBytes
+	macKey := deriveMACKeyRaw(encKey, salt)
 
 	s1 := binary.BigEndian.Uint32(data[16:20])
 	s2 := binary.BigEndian.Uint32(data[20:24])
@@ -839,15 +840,16 @@ func readDBSalt(dbPath string) ([]byte, error) {
 	return salt, nil
 }
 
-// deriveKeysRaw derives enc_key and mac_key from passphrase and salt using SQLCipher 4 PBKDF2.
-func deriveKeysRaw(passphrase, salt []byte) (encKey, macKey []byte) {
-	encKey = pbkdf2.Key(passphrase, salt, kdfIter, 32, sha512.New)
+// deriveMACKeyRaw derives the MAC key from the raw encryption key and salt.
+// WeChat uses SQLCipher's "raw key" mode (x'<64hex><32hex>'), so the key is already
+// the derived encryption key and does NOT need PBKDF2-HMAC-SHA512 derivation.
+func deriveMACKeyRaw(rawKey, salt []byte) (macKey []byte) {
 	macSalt := make([]byte, len(salt))
 	for i := range salt {
 		macSalt[i] = salt[i] ^ 0x3a
 	}
-	macKey = pbkdf2.Key(encKey, macSalt, kdfIterMac, 32, sha512.New)
-	return encKey, macKey
+	macKey = pbkdf2.Key(rawKey, macSalt, kdfIterMac, 32, sha512.New)
+	return macKey
 }
 
 func decryptWALPage(encKey, macKey []byte, pageData []byte, pgno uint32) ([]byte, error) {
