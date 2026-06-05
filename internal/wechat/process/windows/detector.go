@@ -38,7 +38,13 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 	for _, p := range processes {
 		name, err := p.Name()
 		name = strings.TrimSuffix(name, ".exe")
-		if err != nil || (name != V3ProcessName && name != V4ProcessName && name != V4XProcessName) {
+		if err != nil || (name != V3ProcessName && name != V4ProcessName) {
+			continue
+		}
+
+		// WeChatAppEx 是 Weixin.exe 的 Chromium 渲染子进程，不能独立重启，
+		// 不应作为可选的微信实例，跳过
+		if name == V4XProcessName {
 			continue
 		}
 
@@ -59,11 +65,6 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 		if err != nil {
 			log.Err(err).Msgf("获取进程 %d 的信息失败", p.Pid)
 			continue
-		}
-
-		// WeChatAppEx 是基于 Chromium 的渲染进程，其文件版本号不是微信版本号，需要强制设为 v4
-		if name == V4XProcessName {
-			procInfo.Version = 4
 		}
 
 		result = append(result, procInfo)
