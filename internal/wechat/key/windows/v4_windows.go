@@ -90,18 +90,49 @@ func (e *V4Extractor) Extract(ctx context.Context, proc *model.Process) (string,
 	if statusCB != nil {
 		statusCB("开始 init 风格扫描：收集 DB salt -> 内存扫描 -> 写入 all_keys.json")
 	}
-	key, _, err := InitAllKeysByPID(proc.PID, proc.DataDir, statusCB)
-	if err != nil {
-		return "", "", err
+
+	// 首先尝试传入的 PID
+	key, count, err := InitAllKeysByPID(proc.PID, proc.DataDir, statusCB)
+	if err == nil {
+		if forceRescan && statusCB != nil {
+			statusCB("本轮已完成内存重扫，all_keys.json 已更新，正在选取可用密钥...")
+		}
+		imgKey, err := e.pickImageKeyWithTiming(ctx, proc, statusCB, imageOnly)
+		if err != nil {
+			return "", "", err
+		}
+		return strings.ToLower(key), imgKey, nil
 	}
-	if forceRescan && statusCB != nil {
-		statusCB("本轮已完成内存重扫，all_keys.json 已更新，正在选取可用密钥...")
+
+	// 如果传入的 PID 失败，尝试所有 Weixin.exe 主进程
+	log.Warn().Err(err).Msgf("[密钥提取] PID=%d 扫描失败，尝试所有主进程", proc.PID)
+	allPids, pidErr := findAllWeixinPIDs()
+	if pidErr != nil {
+		return "", "", fmt.Errorf("PID=%d 扫描失败: %v, 且查找其他主进程也失败: %v", proc.PID, err, pidErr)
 	}
-	imgKey, err := e.pickImageKeyWithTiming(ctx, proc, statusCB, imageOnly)
-	if err != nil {
-		return "", "", err
+	if len(allPids) == 0 {
+		return "", "", fmt.Errorf("PID=%d 扫描失败: %v, 且未找到其他主进程", proc.PID, err)
 	}
-	return strings.ToLower(key), imgKey, nil
+	for _, pid := range allPids {
+		if pid == proc.PID {
+			continue // 已经试过了
+		}
+		log.Info().Msgf("[密钥提取] 尝试主进程 PID=%d", pid)
+		key, count, err = InitAllKeysByPID(pid, proc.DataDir, statusCB)
+		if err == nil {
+			if forceRescan && statusCB != nil {
+				statusCB("本轮已完成内存重扫，all_keys.json 已更新，正在选取可用密钥...")
+			}
+			imgKey, err := e.pickImageKeyWithTiming(ctx, proc, statusCB, imageOnly)
+			if err != nil {
+				return "", "", err
+			}
+			return strings.ToLower(key), imgKey, nil
+		}
+		log.Warn().Err(err).Msgf("[密钥提取] PID=%d 扫描也失败", pid)
+	}
+
+	return "", "", fmt.Errorf("所有主进程 PID 扫描均失败，最后错误: %v", err)
 }
 
 func (e *V4Extractor) pickImageKeyWithTiming(ctx context.Context, proc *model.Process, status func(string), imageOnly bool) (string, error) {
@@ -1099,11 +1130,25 @@ func isHexByte(b byte) bool {
 }
 
 func findWeChatPID() (uint32, error) {
-	procs, err := process.Processes()
+	pids, err := findAllWeixinPIDs()
 	if err != nil {
 		return 0, err
 	}
-	var maxPID uint32
+	if len(pids) == 0 {
+		return 0, fmt.Errorf("wechat process not found")
+	}
+	// 返回最大的 PID（通常是主进程）
+	return pids[len(pids)-1], nil
+}
+
+// findAllWeixinPIDs 查找所有 Weixin.exe 主进程的 PID
+// 只返回主进程（排除 --type= 子进程），按 PID 升序排列
+func findAllWeixinPIDs() ([]uint32, error) {
+	procs, err := process.Processes()
+	if err != nil {
+		return nil, err
+	}
+	var pids []uint32
 	for _, p := range procs {
 		name, err := p.Name()
 		if err != nil {
@@ -1113,22 +1158,19 @@ func findWeChatPID() (uint32, error) {
 		if name != "weixin" && name != "wechat" {
 			continue
 		}
+		// 排除子进程（--type=renderer/gpu/utility）
 		if name == "weixin" {
 			if cmd, err := p.Cmdline(); err == nil {
-				if strings.Contains(cmd, "--") {
+				if strings.Contains(cmd, "--type=") {
 					continue
 				}
 			}
+			// cmdline 获取失败时保留该进程
 		}
-		pid := uint32(p.Pid)
-		if pid > maxPID {
-			maxPID = pid
-		}
+		pids = append(pids, uint32(p.Pid))
 	}
-	if maxPID == 0 {
-		return 0, fmt.Errorf("wechat process not found")
-	}
-	return maxPID, nil
+	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+	return pids, nil
 }
 
 func normalizePath(p string) string {

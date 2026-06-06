@@ -263,10 +263,16 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		if _, err := os.Stat(exePath); err == nil {
 			wechatStarted = startWeChatOnWindows(exePath)
 		} else {
-			log.Warn().Err(err).Msgf("[重启获取密钥] exePath 不存在: %s", exePath)
+			log.Warn().Err(err).Msgf("[重启获取密钥] exePath 不存在: %s，尝试查找", exePath)
 		}
-	} else {
-		log.Warn().Msg("[重启获取密钥] exePath 为空，无法自动启动")
+	}
+	if !wechatStarted {
+		// exePath 为空或启动失败，尝试从注册表/常见路径查找
+		foundPath := findWeChatExePath()
+		if foundPath != "" {
+			log.Info().Msgf("[重启获取密钥] 从注册表/常见路径找到微信: %s", foundPath)
+			wechatStarted = startWeChatOnWindows(foundPath)
+		}
 	}
 	if !wechatStarted {
 		log.Warn().Msg("[重启获取密钥] 自动启动失败，等待用户手动启动")
@@ -398,31 +404,97 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 
 // startWeChatOnWindows 尝试多种方式在 Windows 上启动微信
 func startWeChatOnWindows(exePath string) bool {
-	// 方法1: PowerShell Start-Process（最可靠，完全脱离父进程）
-	cmd1 := exec.Command("powershell", "-Command", "Start-Process", "-FilePath", exePath)
-	if err := cmd1.Run(); err == nil {
-		log.Info().Msg("[启动微信] 方法1 PowerShell 启动成功")
-		return true
+	log.Info().Msgf("[启动微信] 尝试启动: %s", exePath)
+
+	// 方法1: cmd /c start（最简单可靠）
+	cmd1 := exec.Command("cmd", "/c", "start", "", exePath)
+	cmd1.Dir = filepath.Dir(exePath)
+	output1, err1 := cmd1.CombinedOutput()
+	if err1 == nil {
+		// 等待1秒验证进程是否启动
+		time.Sleep(1 * time.Second)
+		if verifyWeChatProcessRunning() {
+			log.Info().Msg("[启动微信] 方法1 cmd start 启动成功")
+			return true
+		}
+		log.Warn().Msg("[启动微信] 方法1 cmd start 命令成功但进程未检测到")
+	} else {
+		log.Warn().Err(err1).Msgf("[启动微信] 方法1 cmd start 失败: %s", string(output1))
 	}
 
-	// 方法2: cmd start
-	cmd2 := exec.Command("cmd", "/c", "start", "", exePath)
-	cmd2.Dir = filepath.Dir(exePath)
-	if err := cmd2.Run(); err == nil {
-		log.Info().Msg("[启动微信] 方法2 cmd start 启动成功")
-		return true
+	// 方法2: PowerShell Start-Process
+	cmd2 := exec.Command("powershell", "-Command", "Start-Process", "-FilePath", exePath)
+	output2, err2 := cmd2.CombinedOutput()
+	if err2 == nil {
+		time.Sleep(1 * time.Second)
+		if verifyWeChatProcessRunning() {
+			log.Info().Msg("[启动微信] 方法2 PowerShell 启动成功")
+			return true
+		}
+		log.Warn().Msg("[启动微信] 方法2 PowerShell 命令成功但进程未检测到")
+	} else {
+		log.Warn().Err(err2).Msgf("[启动微信] 方法2 PowerShell 失败: %s", string(output2))
 	}
 
-	// 方法3: 直接启动（最后手段，进程可能随父进程退出）
+	// 方法3: 直接启动
 	cmd3 := exec.Command(exePath)
 	cmd3.Dir = filepath.Dir(exePath)
 	if err := cmd3.Start(); err == nil {
-		log.Info().Msg("[启动微信] 方法3 直接启动成功")
-		return true
+		time.Sleep(1 * time.Second)
+		if verifyWeChatProcessRunning() {
+			log.Info().Msg("[启动微信] 方法3 直接启动成功")
+			return true
+		}
+		log.Warn().Msg("[启动微信] 方法3 直接启动命令成功但进程未检测到")
+	} else {
+		log.Warn().Err(err).Msg("[启动微信] 方法3 直接启动失败")
 	}
 
 	log.Warn().Msg("[启动微信] 所有自动启动方式均失败")
 	return false
+}
+
+// verifyWeChatProcessRunning 验证微信进程是否正在运行
+func verifyWeChatProcessRunning() bool {
+	instances := m.wechat.GetWeChatInstances()
+	return len(instances) > 0
+}
+
+// findWeChatExePath 从注册表和常见路径查找微信可执行文件
+func findWeChatExePath() string {
+	// 从注册表查找
+	if p, err := exec.Command("powershell", "-Command",
+		"(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\WOW6432Node\\Tencent\\WeChat' -Name 'InstallPath' -ErrorAction SilentlyContinue).InstallPath").Output(); err == nil {
+		path := strings.TrimSpace(string(p))
+		if path != "" {
+			exePath := filepath.Join(path, "Weixin.exe")
+			if _, err := os.Stat(exePath); err == nil {
+				log.Info().Msgf("[查找微信] 从注册表找到: %s", exePath)
+				return exePath
+			}
+			exePath = filepath.Join(path, "WeChat.exe")
+			if _, err := os.Stat(exePath); err == nil {
+				log.Info().Msgf("[查找微信] 从注册表找到: %s", exePath)
+				return exePath
+			}
+		}
+	}
+
+	// 常见安装路径
+	commonPaths := []string{
+		`C:\Program Files\Tencent\Weixin\Weixin.exe`,
+		`C:\Program Files (x86)\Tencent\WeChat\WeChat.exe`,
+		`C:\Program Files\Tencent\WeChat\WeChat.exe`,
+		`C:\Program Files (x86)\Tencent\Weixin\Weixin.exe`,
+	}
+	for _, p := range commonPaths {
+		if _, err := os.Stat(p); err == nil {
+			log.Info().Msgf("[查找微信] 从常见路径找到: %s", p)
+			return p
+		}
+	}
+
+	return ""
 }
 
 func normalizeKeyAcquireError(err error) error {
