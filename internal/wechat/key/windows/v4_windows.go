@@ -691,23 +691,30 @@ func readDBSalt(path string) (string, bool) {
 }
 
 func scanKeySaltPairsByPID(pid uint32) ([]keySaltPair, error) {
+	log.Info().Msgf("[内存扫描] 正在打开进程 PID=%d", pid)
 	handle, err := windows.OpenProcess(windows.PROCESS_VM_READ|windows.PROCESS_QUERY_INFORMATION, false, pid)
 	if err != nil {
-		return nil, fmt.Errorf("open process failed: %w", err)
+		log.Error().Err(err).Msgf("[内存扫描] OpenProcess 失败 PID=%d，可能需要管理员权限", pid)
+		return nil, fmt.Errorf("open process failed (PID=%d): %w", pid, err)
 	}
 	defer windows.CloseHandle(handle)
+	log.Info().Msgf("[内存扫描] OpenProcess 成功 PID=%d，开始扫描内存", pid)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return scanKeySaltCandidates(ctx, handle)
+	return scanKeySaltCandidates(ctx, handle, pid)
 }
 
-func scanKeySaltCandidates(ctx context.Context, handle windows.Handle) ([]keySaltPair, error) {
+func scanKeySaltCandidates(ctx context.Context, handle windows.Handle, pid uint32) ([]keySaltPair, error) {
 	results := make([]keySaltPair, 0, 128)
 	seen := make(map[string]struct{})
 	var addr uintptr
+	regionCount := 0
+	scannedRegions := 0
+	totalBytes := uint64(0)
 	for {
 		select {
 		case <-ctx.Done():
+			log.Warn().Msgf("[内存扫描] 超时 PID=%d, 已扫描 %d/%d 区域, %d 字节", pid, scannedRegions, regionCount, totalBytes)
 			return results, ctx.Err()
 		default:
 		}
@@ -716,7 +723,10 @@ func scanKeySaltCandidates(ctx context.Context, handle windows.Handle) ([]keySal
 		if err != nil {
 			break
 		}
+		regionCount++
 		if mbi.State == windows.MEM_COMMIT && isRWProtect(mbi.Protect) && mbi.RegionSize > 0 {
+			scannedRegions++
+			totalBytes += uint64(mbi.RegionSize)
 			scanRegionForKeySalt(ctx, handle, uintptr(mbi.BaseAddress), uintptr(mbi.RegionSize), &results, seen)
 		}
 		next := uintptr(mbi.BaseAddress) + uintptr(mbi.RegionSize)
@@ -725,6 +735,8 @@ func scanKeySaltCandidates(ctx context.Context, handle windows.Handle) ([]keySal
 		}
 		addr = next
 	}
+	log.Info().Msgf("[内存扫描] 完成 PID=%d, 扫描 %d/%d 区域, %d 字节, 发现 %d 组候选",
+		pid, scannedRegions, regionCount, totalBytes, len(results))
 	return results, nil
 }
 

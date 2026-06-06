@@ -86,10 +86,9 @@ func (a *Account) RefreshStatus() error {
 
 			if !foundByPID {
 				// 微信可能重启了，原来的PID找不到进程
-				// 尝试查找其他微信进程
+				// 尝试查找其他微信进程，优先选择主进程
 				if len(processes) > 0 {
-					// 选择第一个微信进程（假设只有一个微信实例）
-					process = processes[0]
+					process = pickMainProcess(processes)
 
 					// 保存旧的PID用于日志
 					oldPID := a.PID
@@ -130,8 +129,8 @@ func (a *Account) RefreshStatus() error {
 			}
 
 			if len(processes) > 0 {
-				// 找到微信进程，更新账号信息
-				process = processes[0]
+				// 找到微信进程，更新账号信息，优先选择主进程
+				process = pickMainProcess(processes)
 
 				// 更新进程信息
 				a.PID = process.PID
@@ -197,6 +196,28 @@ func (a *Account) RefreshStatus() error {
 	return nil
 }
 
+// pickMainProcess 从进程列表中选择最佳进程，优先选择主进程（非渲染进程）
+// 密钥只在主进程(Weixin.exe)内存中，渲染进程(WeChatAppEx.exe)没有
+func pickMainProcess(processes []*model.Process) *model.Process {
+	if len(processes) == 0 {
+		return nil
+	}
+	// 优先：主进程 + 已登录（DataDir非空）
+	for _, p := range processes {
+		if !p.IsRenderer && p.DataDir != "" {
+			return p
+		}
+	}
+	// 其次：主进程（即使未登录）
+	for _, p := range processes {
+		if !p.IsRenderer {
+			return p
+		}
+	}
+	// 最后：任意进程
+	return processes[0]
+}
+
 // clearAccountData 清除账号数据（当微信退出时调用）
 func (a *Account) clearAccountData() {
 	// 保存旧的名称用于日志
@@ -260,15 +281,32 @@ func (a *Account) GetKey(ctx context.Context) (string, string, error) {
 		log.Warn().Msgf("GetProcess 返回了渲染进程 PID=%d，尝试查找主进程", process.PID)
 		allProcs, loadErr := GetAllProcesses()
 		if loadErr == nil {
+			// 优先找有 DataDir 的主进程
 			for _, p := range allProcs {
-				if !p.IsRenderer && p.Version == process.Version && p.DataDir != "" {
+				if !p.IsRenderer && p.DataDir != "" {
 					process = p
-					log.Info().Msgf("找到主进程 PID=%d 用于密钥提取", process.PID)
+					log.Info().Msgf("找到主进程 PID=%d (有DataDir) 用于密钥提取", process.PID)
 					break
+				}
+			}
+			// 如果主进程没有 DataDir，仍然使用它，但补充 DataDir
+			if process.IsRenderer {
+				for _, p := range allProcs {
+					if !p.IsRenderer {
+						// 复制一份避免修改 processMap
+						procCopy := *p
+						if procCopy.DataDir == "" && a.DataDir != "" {
+							procCopy.DataDir = a.DataDir
+						}
+						process = &procCopy
+						log.Info().Msgf("找到主进程 PID=%d (DataDir从Account补充: %s) 用于密钥提取", process.PID, process.DataDir)
+						break
+					}
 				}
 			}
 		}
 	}
+	log.Info().Msgf("[密钥提取] 使用进程 PID=%d, IsRenderer=%v, DataDir=%s", process.PID, process.IsRenderer, process.DataDir)
 
 	if isV4 && process.DataDir == "" {
 		log.Info().Msg("检测到V4版本且数据目录未就绪，等待微信登录...")

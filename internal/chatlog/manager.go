@@ -349,7 +349,8 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	if onStatus != nil {
 		onStatus("正在扫描并验证密钥...")
 	}
-	log.Info().Msg("[重启获取密钥] 开始获取密钥...")
+	log.Info().Msgf("[重启获取密钥] 开始获取密钥... Current: PID=%d, Name=%s, IsRenderer=%v, DataDir=%s",
+		m.ctx.Current.PID, m.ctx.Current.Name, m.ctx.Current.IsRenderer, m.ctx.Current.DataDir)
 
 	ctx := context.WithValue(context.Background(), "status_callback", onStatus)
 	ctx = context.WithValue(ctx, "force_key_refresh", true)
