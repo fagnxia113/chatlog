@@ -86,8 +86,19 @@ func (d *Detector) getProcessInfo(p *process.Process) (*model.Process, error) {
 	// 获取可执行文件路径
 	exePath, err := p.Exe()
 	if err != nil {
-		log.Err(err).Msg("获取可执行文件路径失败")
-		return nil, err
+		log.Warn().Err(err).Msgf("获取进程 %d 的可执行文件路径失败，尝试通过 Cwd 推断", p.Pid)
+		// 尝试通过工作目录推断路径
+		cwd, cwdErr := p.Cwd()
+		if cwdErr != nil {
+			log.Err(cwdErr).Msgf("获取进程 %d 的工作目录也失败，跳过该进程", p.Pid)
+			return nil, cwdErr
+		}
+		// 工作目录通常是微信安装目录
+		exePath = filepath.Join(cwd, "Weixin.exe")
+		if _, statErr := os.Stat(exePath); statErr != nil {
+			exePath = filepath.Join(cwd, "WeChat.exe")
+		}
+		log.Info().Msgf("通过工作目录推断 exePath: %s", exePath)
 	}
 	procInfo.ExePath = exePath
 

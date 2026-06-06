@@ -275,69 +275,62 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	if onStatus != nil {
 		onStatus("正在等待微信启动并登录...")
 	}
-	var newInstance *iwechat.Account
-	for i := 0; i < 120; i++ { // 最多等待120秒
+	deadline := time.Now().Add(120 * time.Second)
+	for {
 		instances = m.wechat.GetWeChatInstances()
 		if len(instances) > 0 {
-			log.Info().Msgf("[重启获取密钥] 检测到 %d 个微信进程", len(instances))
-			// 优先选择主进程
+			// 优先选择主进程且已登录的实例
+			var bestInstance *iwechat.Account
 			for _, inst := range instances {
-				if !inst.IsRenderer {
-					newInstance = inst
+				if !inst.IsRenderer && inst.DataDir != "" {
+					bestInstance = inst
 					break
 				}
 			}
-			// 没有主进程就选渲染进程
-			if newInstance == nil {
-				newInstance = instances[0]
+			// 没有已登录的主进程，选已登录的渲染进程
+			if bestInstance == nil {
+				for _, inst := range instances {
+					if inst.DataDir != "" {
+						bestInstance = inst
+						break
+					}
+				}
 			}
-			break
-		}
-		if i%10 == 0 {
-			log.Info().Msgf("[重启获取密钥] 等待微信启动... (%d/120)", i+1)
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if newInstance == nil {
-		return fmt.Errorf("未检测到微信进程，请手动启动微信后重试")
-	}
-	log.Info().Msgf("[重启获取密钥] 找到微信进程 PID=%d, DataDir=%s", newInstance.PID, newInstance.DataDir)
-
-	// 切换到新实例
-	m.ctx.SwitchCurrent(newInstance)
-
-	// ===== 阶段5: 等待微信登录（DataDir 不为空表示已登录） =====
-	if onStatus != nil {
-		onStatus("请扫码登录微信...")
-	}
-	deadline := time.Now().Add(120 * time.Second) // 最多等待120秒登录
-	for {
-		// 刷新实例信息
-		instances = m.wechat.GetWeChatInstances()
-		if best := pickBestWeChatInstance(instances, exePath, "windows"); best != nil {
-			if m.ctx.Current.PID != best.PID {
-				m.ctx.SwitchCurrent(best)
+			// 没有已登录的实例，选主进程
+			if bestInstance == nil {
+				for _, inst := range instances {
+					if !inst.IsRenderer {
+						bestInstance = inst
+						break
+					}
+				}
 			}
-		}
+			// 最后选任意实例
+			if bestInstance == nil {
+				bestInstance = instances[0]
+			}
 
-		if m.ctx.Current != nil && m.ctx.Current.DataDir != "" {
-			log.Info().Msgf("[重启获取密钥] 微信已登录, DataDir=%s", m.ctx.Current.DataDir)
-			break
+			m.ctx.SwitchCurrent(bestInstance)
+
+			if bestInstance.DataDir != "" {
+				log.Info().Msgf("[重启获取密钥] 微信已登录, PID=%d, DataDir=%s", bestInstance.PID, bestInstance.DataDir)
+				break
+			}
+
+			if onStatus != nil {
+				onStatus("请扫码登录微信...")
+			}
+		} else if onStatus != nil {
+			onStatus("请启动微信并登录...")
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("获取密钥超时: 微信登录未就绪，请扫码登录微信后重试")
-		}
-
-		if onStatus != nil {
-			elapsed := int(time.Since(deadline.Add(-120 * time.Second)).Seconds())
-			onStatus(fmt.Sprintf("请扫码登录微信...（已等待 %ds/120s）", elapsed))
+			return fmt.Errorf("获取密钥超时: 微信启动或登录未完成，请重试")
 		}
 		time.Sleep(1 * time.Second)
 	}
 
-	// ===== 阶段6: 获取密钥 =====
+	// ===== 阶段5: 获取密钥 =====
 	if onStatus != nil {
 		onStatus("正在扫描并验证密钥...")
 	}
