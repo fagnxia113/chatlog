@@ -262,13 +262,20 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 	if exePath != "" {
 		if _, err := os.Stat(exePath); err == nil {
 			wechatStarted = startWeChatOnWindows(exePath)
+		} else {
+			log.Warn().Err(err).Msgf("[重启获取密钥] exePath 不存在: %s", exePath)
 		}
+	} else {
+		log.Warn().Msg("[重启获取密钥] exePath 为空，无法自动启动")
 	}
 	if !wechatStarted {
 		log.Warn().Msg("[重启获取密钥] 自动启动失败，等待用户手动启动")
 		if onStatus != nil {
 			onStatus("请手动启动微信并登录...")
 		}
+	} else {
+		// 启动后等待2秒，给微信进程初始化时间
+		time.Sleep(2 * time.Second)
 	}
 
 	// ===== 阶段4: 等待微信进程出现并登录 =====
@@ -276,9 +283,12 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 		onStatus("正在等待微信启动并登录...")
 	}
 	deadline := time.Now().Add(120 * time.Second)
+	loopCount := 0
 	for {
+		loopCount++
 		instances = m.wechat.GetWeChatInstances()
 		if len(instances) > 0 {
+			log.Info().Msgf("[重启获取密钥] 检测到 %d 个微信进程", len(instances))
 			// 优先选择主进程且已登录的实例
 			var bestInstance *iwechat.Account
 			for _, inst := range instances {
@@ -320,8 +330,13 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 			if onStatus != nil {
 				onStatus("请扫码登录微信...")
 			}
-		} else if onStatus != nil {
-			onStatus("请启动微信并登录...")
+		} else {
+			if loopCount%5 == 1 {
+				log.Info().Msg("[重启获取密钥] 未检测到微信进程，继续等待...")
+			}
+			if onStatus != nil {
+				onStatus("请启动微信并登录...")
+			}
 		}
 
 		if time.Now().After(deadline) {
@@ -382,26 +397,26 @@ func (m *Manager) RestartAndGetDataKey(onStatus func(string)) error {
 
 // startWeChatOnWindows 尝试多种方式在 Windows 上启动微信
 func startWeChatOnWindows(exePath string) bool {
-	// 方法1: 直接启动
-	cmd1 := exec.Command(exePath)
-	cmd1.Dir = filepath.Dir(exePath)
-	if err := cmd1.Start(); err == nil {
-		log.Info().Msg("[启动微信] 方法1 直接启动成功")
+	// 方法1: PowerShell Start-Process（最可靠，完全脱离父进程）
+	cmd1 := exec.Command("powershell", "-Command", "Start-Process", "-FilePath", exePath)
+	if err := cmd1.Run(); err == nil {
+		log.Info().Msg("[启动微信] 方法1 PowerShell 启动成功")
 		return true
 	}
 
-	// 方法2: PowerShell Start-Process
-	cmd2 := exec.Command("powershell", "-Command", "Start-Process", "-FilePath", exePath)
+	// 方法2: cmd start
+	cmd2 := exec.Command("cmd", "/c", "start", "", exePath)
+	cmd2.Dir = filepath.Dir(exePath)
 	if err := cmd2.Run(); err == nil {
-		log.Info().Msg("[启动微信] 方法2 PowerShell 启动成功")
+		log.Info().Msg("[启动微信] 方法2 cmd start 启动成功")
 		return true
 	}
 
-	// 方法3: cmd start
-	cmd3 := exec.Command("cmd", "/c", "start", "", exePath)
+	// 方法3: 直接启动（最后手段，进程可能随父进程退出）
+	cmd3 := exec.Command(exePath)
 	cmd3.Dir = filepath.Dir(exePath)
-	if err := cmd3.Run(); err == nil {
-		log.Info().Msg("[启动微信] 方法3 cmd start 启动成功")
+	if err := cmd3.Start(); err == nil {
+		log.Info().Msg("[启动微信] 方法3 直接启动成功")
 		return true
 	}
 

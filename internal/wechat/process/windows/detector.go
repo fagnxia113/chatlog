@@ -45,13 +45,15 @@ func (d *Detector) FindProcesses() ([]*model.Process, error) {
 		}
 
 		// v4 存在同名进程，需要继续判断 cmdline
+		// 只过滤 --type= 子进程（renderer/gpu/utility），不过滤主进程
 		if name == V4ProcessName {
 			cmdline, err := p.Cmdline()
 			if err != nil {
-				log.Err(err).Msg("获取进程命令行失败")
-				continue
-			}
-			if strings.Contains(cmdline, "--") {
+				// cmdline 获取失败时，仍然保留该进程（可能是权限问题）
+				// 主进程通常没有 --type= 参数，保留它是安全的
+				log.Warn().Err(err).Msgf("获取进程 %d 的命令行失败，仍保留该进程", p.Pid)
+			} else if strings.Contains(cmdline, "--type=") {
+				// --type=renderer, --type=gpu-process, --type=utility 等是子进程，跳过
 				continue
 			}
 		}
