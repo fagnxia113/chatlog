@@ -255,6 +255,21 @@ func (a *Account) GetKey(ctx context.Context) (string, string, error) {
 		return "", "", err
 	}
 
+	// 确保使用主进程进行密钥提取，渲染进程(WeChatAppEx.exe)内存中没有加密密钥
+	if process.IsRenderer {
+		log.Warn().Msgf("GetProcess 返回了渲染进程 PID=%d，尝试查找主进程", process.PID)
+		allProcs, loadErr := GetAllProcesses()
+		if loadErr == nil {
+			for _, p := range allProcs {
+				if !p.IsRenderer && p.Version == process.Version && p.DataDir != "" {
+					process = p
+					log.Info().Msgf("找到主进程 PID=%d 用于密钥提取", process.PID)
+					break
+				}
+			}
+		}
+	}
+
 	if isV4 && process.DataDir == "" {
 		log.Info().Msg("检测到V4版本且数据目录未就绪，等待微信登录...")
 		for i := 0; i < 30; i++ {

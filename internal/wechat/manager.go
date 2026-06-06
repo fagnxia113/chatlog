@@ -70,6 +70,11 @@ func (m *Manager) Load() error {
 
 		accounts = append(accounts, account)
 		if account.Name != "" {
+			// 主进程优先：如果已有同名主进程，不让渲染进程覆盖
+			// 因为密钥只在主进程(Weixin.exe)内存中，渲染进程(WeChatAppEx.exe)没有
+			if existing, ok := processMap[account.Name]; ok && !existing.IsRenderer && p.IsRenderer {
+				continue
+			}
 			processMap[account.Name] = p
 		}
 	}

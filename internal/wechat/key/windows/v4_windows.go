@@ -399,6 +399,18 @@ func InitAllKeysByPID(pid uint32, dataDir string, status func(string)) (string, 
 		return "", 0, fmt.Errorf("invalid dataDir")
 	}
 
+	log.Info().Msgf("[密钥提取] 开始扫描 PID=%d, DataDir=%s", pid, dataDir)
+
+	// 检查 PID 对应的进程是否是主进程（非渲染进程）
+	if p, err := process.NewProcess(int32(pid)); err == nil {
+		if name, err := p.Name(); err == nil {
+			log.Info().Msgf("[密钥提取] PID=%d 进程名: %s", pid, name)
+			if strings.HasPrefix(name, "WeChatAppEx") {
+				log.Warn().Msgf("[密钥提取] 警告: PID=%d 是渲染进程(WeChatAppEx.exe)，密钥通常只在主进程(Weixin.exe)中", pid)
+			}
+		}
+	}
+
 	accountDir, dbStorageDir := resolveDBDirs(dataDir)
 	dbSalts, err := collectDBSalts(dbStorageDir)
 	if err != nil {
