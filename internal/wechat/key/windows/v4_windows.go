@@ -92,7 +92,7 @@ func (e *V4Extractor) Extract(ctx context.Context, proc *model.Process) (string,
 	}
 
 	// 首先尝试传入的 PID
-	key, count, err := InitAllKeysByPID(proc.PID, proc.DataDir, statusCB)
+	key, _, err := InitAllKeysByPID(proc.PID, proc.DataDir, statusCB)
 	if err == nil {
 		if forceRescan && statusCB != nil {
 			statusCB("本轮已完成内存重扫，all_keys.json 已更新，正在选取可用密钥...")
@@ -118,7 +118,7 @@ func (e *V4Extractor) Extract(ctx context.Context, proc *model.Process) (string,
 			continue // 已经试过了
 		}
 		log.Info().Msgf("[密钥提取] 尝试主进程 PID=%d", pid)
-		key, count, err = InitAllKeysByPID(pid, proc.DataDir, statusCB)
+		key, _, err = InitAllKeysByPID(pid, proc.DataDir, statusCB)
 		if err == nil {
 			if forceRescan && statusCB != nil {
 				statusCB("本轮已完成内存重扫，all_keys.json 已更新，正在选取可用密钥...")
